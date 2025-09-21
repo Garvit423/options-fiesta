@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Options Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        .plot-title {
+            font-weight: bold;
+            margin-top: 10px;
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body class="p-4">
+    <h2>Options Dashboard (Expiry: {{ expiry }})</h2>
+
+    <ul class="nav nav-tabs">
+        <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#greeks">Greek Calculator</a></li>
+    </ul>
+
+    <div class="tab-content mt-3">
+        <div class="tab-pane fade show active" id="greeks">
+            <div class="mb-3">
+                <input id="rval" type="number" placeholder="Risk Free Rate" class="form-control" value="0.15"/>
+                <button onclick="loadGreeks()" class="btn btn-primary mt-2">Plot Greeks</button>
+            </div>
+            <div id="greekCharts" class="row"></div>
+        </div>
+    </div>
+
+<script>
+function loadGreeks() {
+    const r = document.getElementById('rval').value;
+    fetch(`/api/greeks/?r=${r}`)
+        .then(res => res.json())
+        .then(res => {
+            const container = document.getElementById('greekCharts');
+            container.innerHTML = '';
+
+            const data = res.data;
+            const greeks = ['delta', 'gamma', 'theta', 'vega', 'rho'];
+
+            for (const [label, points] of Object.entries(data)) {
+                const [strike, opt_type] = label.split('_');
+                greeks.forEach(greek => {
+                    const trace = {
+                        x: points.map(p => p.datetime),
+                        y: points.map(p => p[greek]),
+                        mode: 'lines+markers',
+                        name: `${greek}`
+                    };
+
+                    const layout = {
+                        title: `Greek: ${greek.toUpperCase()} | Type: ${opt_type.toUpperCase()} | Strike: ${strike}`,
+                        xaxis: { title: 'Time' },
+                        yaxis: { title: greek },
+                        height: 300
+                    };
+
+                    const col = document.createElement('div');
+                    col.className = 'col-12 mb-4';
+                    container.appendChild(col);
+                    Plotly.newPlot(col, [trace], layout);
+                });
+            }
+        });
+}
+</script>
+</body>
+</html>
