@@ -343,9 +343,4 @@ The risk-free rate is supplied as a decimal, so `0.06` represents 6% per year.
 - The current dataset contains one expiry, so the 3D visualization is historical strike × time rather than a full cross-maturity surface.
 - Backtests use minute-bar closing prices rather than bid and ask quotes.
 - The current research notebooks do not model transaction costs, slippage, queue position, partial fills, or market impact.
-- Strategy results are based on a limited historical sample and are not evidence of future profitability.
-- The dashboard's backtest API serves exported research output; the actual strategy calculations remain in the notebooks.
 
-## Disclaimer
-
-This repository is an educational quantitative-finance project. It is not investment advice and is not intended for live trading without further validation, execution modelling, and risk controls.
