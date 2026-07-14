@@ -1,128 +1,161 @@
 # Options Fiesta
 
-> A Django-based NIFTY options analytics dashboard for implied-volatility
-> inversion, Black–Scholes Greeks, historical volatility visualization, and
-> multi-leg strategy research.
+Options Fiesta is a Django-based options analytics and strategy-research project built on minute-level NIFTY spot and option data. It computes implied volatility by inverting the Black–Scholes model, calculates the main option Greeks, visualizes implied volatility across strikes and time, and includes historical backtests for long straddle and long call butterfly strategies.
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
-![Django](https://img.shields.io/badge/Django-5.2-0C4B33?logo=django&logoColor=white)
-![NumPy](https://img.shields.io/badge/NumPy-Vectorized%20Math-4D77CF?logo=numpy&logoColor=white)
-![Pandas](https://img.shields.io/badge/Pandas-Time--Series%20Pipeline-150458?logo=pandas&logoColor=white)
-![SciPy](https://img.shields.io/badge/SciPy-Brent%20Root%20Solver-8CAAE6?logo=scipy&logoColor=white)
+The bundled dataset is historical. Analytics are computed on demand when an API request is made; the project is not connected to a live exchange feed.
 
-## Thirty-second overview
+## Features
 
-Options Fiesta turns minute-level NIFTY spot and option-chain CSV data into a
-browser-based quantitative-analysis workflow:
+- Discovers option contracts from strike, option type, and expiry encoded in CSV filenames.
+- Aligns option premiums with NIFTY spot observations using minute timestamps.
+- Prices European calls and puts with the Black–Scholes model.
+- Solves for implied volatility with SciPy's Brent root-finding method.
+- Computes Delta, Gamma, Theta, Vega, and Rho from analytical formulas.
+- Exposes the analytics through Django JSON endpoints with server-side caching.
+- Uses Plotly in the dashboard for interactive Greek histories and a 3D implied-volatility view.
+- Contains historical long straddle and long call butterfly backtests with trade logs, position sizing, equity curves, Sharpe-ratio calculation, and drawdown analysis.
 
-1. **Discover contracts** from strike/right/expiry filenames.
-2. **Synchronize option and underlying observations** by timestamp with Pandas.
-3. **Infer implied volatility** by numerically inverting Black–Scholes using
-   SciPy's bracketed Brent solver.
-4. **Compute Delta, Gamma, Theta, Vega, and Rho** from analytical formulas.
-5. **Serve JSON analytics endpoints** through Django with server-side caching.
-6. **Render interactive Plotly charts**, including Greek histories and a
-   strike-versus-time implied-volatility surface.
-7. **Research long straddle and long call butterfly strategies** in reproducible
-   notebooks using the same repository-level market data.
+## Quantitative methodology
 
-The project separates raw market data, the Django application, and quantitative
-research notebooks. No analytics path depends on where the server or Jupyter
-process was launched.
+### Black–Scholes pricing and implied volatility
 
----
-
-## What the dashboard provides
-
-### Implied-volatility inversion
-
-For a market premium \(P_{mkt}\), the backend solves:
+For spot price \(S\), strike \(K\), time to expiry \(T\), risk-free rate \(r\), and volatility \(\sigma\):
 
 \[
-BS(S,K,T,r,\sigma,\text{right})-P_{mkt}=0
+d_1 = \frac{\ln(S/K) + (r + \frac{1}{2}\sigma^2)T}{\sigma\sqrt{T}},
+\qquad
+d_2 = d_1 - \sigma\sqrt{T}
 \]
 
-using `scipy.optimize.brentq` on a bounded volatility interval. Brent's method
-was selected because it combines the reliability of a bracketed solver with
-faster convergence than plain bisection and does not require a Vega-based
-initial step like Newton–Raphson.
+The call and put prices are:
 
-### Analytical Greeks
+\[
+C = S N(d_1) - K e^{-rT}N(d_2)
+\]
 
-After IV is recovered, the engine evaluates:
+\[
+P = K e^{-rT}N(-d_2) - S N(-d_1)
+\]
 
-- **Delta** — first-order sensitivity to the underlying price;
-- **Gamma** — curvature of option value with respect to the underlying;
-- **Theta** — time decay, reported per calendar day;
-- **Vega** — sensitivity to a one-percentage-point volatility move;
-- **Rho** — sensitivity to a one-percentage-point interest-rate move.
+Given an observed option premium \(P_{market}\), implied volatility is obtained by solving:
 
-### Historical volatility visualization
+\[
+BS(S,K,T,r,\sigma)-P_{market}=0
+\]
 
-The dashboard exposes option IV through time across available strikes. Because
-the bundled dataset contains one expiry (`2023-12-28`), the 3D display is best
-interpreted as a **historical strike × observation-time × IV surface**. A
-standard strike × maturity × IV surface requires multiple expiries observed at
-the same valuation timestamp.
+The implementation uses `scipy.optimize.brentq` over a bounded volatility interval. Brent's method was chosen because it is a bracketed solver and does not require the initial volatility estimate or Vega-based update used by Newton–Raphson.
 
-### Strategy research
+Implementation:
 
-The notebooks contain historical research for:
+- [`backend/dashboard/iv.py`](backend/dashboard/iv.py)
+- [`backend/dashboard/views.py`](backend/dashboard/views.py)
 
-- **Long ATM straddle:** `+1 Call(K) +1 Put(K)`;
-- **Long call butterfly:** `+1 Call(K-d) -2 Call(K) +1 Call(K+d)`.
+### Greeks
 
-They cover signal generation, contract selection, position sizing, trade logs,
-equity curves, Sharpe-ratio calculation, and drawdown analysis. The current web
-adapter displays exported notebook summaries and charts; the notebook-to-engine
-promotion is intentionally kept visible rather than presenting saved research
-output as a live execution service.
+After implied volatility is recovered, the project computes:
 
----
+| Greek | Interpretation | Reported unit |
+|---|---|---|
+| Delta | Change in option value for a one-unit change in spot | price units per spot unit |
+| Gamma | Change in Delta for a one-unit change in spot | per spot unit squared |
+| Theta | Time decay | per calendar day |
+| Vega | Sensitivity to volatility | per one percentage-point volatility move |
+| Rho | Sensitivity to interest rates | per one percentage-point rate move |
 
-## Architecture
+Implementation:
+
+- [`backend/dashboard/greeks.py`](backend/dashboard/greeks.py)
+
+### Implied-volatility visualization
+
+The dashboard calculates IV for the available strikes at selected timestamps and renders an interactive Plotly surface.
+
+The bundled options data contains one expiry, `2023-12-28`. The current 3D view is therefore a **historical strike × observation-time × implied-volatility surface**. A conventional strike × time-to-expiry surface at one valuation time requires data for multiple expiries.
+
+Implementation:
+
+- [`backend/dashboard/views.py`](backend/dashboard/views.py), particularly the IV endpoints
+- [`backend/dashboard/templates/dashboard/index.html`](backend/dashboard/templates/dashboard/index.html)
+
+## Strategy backtests
+
+The strategy research is contained in two notebooks. Both use minute-level NIFTY data, select contracts from the option CSVs, maintain trade state, size positions subject to a capital-per-trade limit, record completed trades, and calculate portfolio statistics.
+
+### Long ATM straddle
+
+At entry, the strategy buys an at-the-money call and put with the same strike and expiry:
+
+\[
++1\,C(K) + 1\,P(K)
+\]
+
+The signal is based on Bollinger Band Width falling below a rolling lower quantile, representing a low-volatility regime. The ATM strike is selected by rounding the underlying level to the nearest available 100-point strike.
+
+Notebook:
+
+- [`notebooks/straddle_backtest.ipynb`](notebooks/straddle_backtest.ipynb)
+
+### Long call butterfly
+
+The butterfly uses three equally spaced call strikes:
+
+\[
++1\,C(K-d) - 2\,C(K) + 1\,C(K+d)
+\]
+
+The bundled notebook uses a 100-point wing width. It applies the same volatility-compression signal and records the entry and exit price of every leg.
+
+Notebook:
+
+- [`notebooks/butterfly_backtest.ipynb`](notebooks/butterfly_backtest.ipynb)
+
+### Performance measures
+
+The notebooks produce:
+
+- total and per-trade P&L;
+- number of trades and winning trades;
+- equity curve;
+- peak-to-trough drawdown;
+- Sharpe ratio based on changes in portfolio equity.
+
+For an equity series \(E_t\), drawdown is calculated as:
+
+\[
+DD_t = \frac{E_t-\max_{u\leq t}E_u}{\max_{u\leq t}E_u}
+\]
+
+The annualized Sharpe ratio follows:
+
+\[
+\text{Sharpe} = \sqrt{A}\frac{\operatorname{mean}(r_t-r_{f,t})}{\operatorname{std}(r_t)}
+\]
+
+where the annualization factor \(A\) must match the frequency of the return series.
+
+The notebooks are the source of truth for strategy calculations. The current Django backtest endpoint displays the latest exported notebook summaries and figures rather than rerunning the notebook on every request.
+
+## Data flow
 
 ```text
-                    ┌─────────────────────────────┐
-                    │ Minute-level CSV market data│
-                    │ spot + individual contracts │
-                    └──────────────┬──────────────┘
-                                   │
-                         contract discovery
-                         timestamp alignment
-                                   │
-                 ┌─────────────────┴─────────────────┐
-                 │                                   │
-       ┌─────────▼─────────┐               ┌─────────▼─────────┐
-       │ Django analytics  │               │ Research notebooks │
-       │ IV + Greeks APIs  │               │ strategy backtests │
-       └─────────┬─────────┘               └─────────┬─────────┘
-                 │                                   │
-           cached JSON                         P&L / risk metrics
-                 │                                   │
-       ┌─────────▼───────────────────────────────────▼─────────┐
-       │          Browser dashboard and research output        │
-       │          Plotly surfaces, histories, equity curves    │
-       └───────────────────────────────────────────────────────┘
+NIFTY spot CSV ───────────────┐
+                              ├─ timestamp alignment ─┐
+Individual option CSVs ───────┘                       │
+                                                      ├─ Black–Scholes IV
+                                                      ├─ Greeks
+                                                      ├─ IV time series
+                                                      └─ Django JSON APIs
+                                                               │
+                                                               └─ Plotly dashboard
+
+Spot and option CSVs ── strategy signal ── contract selection ── trade loop
+                                                               │
+                                                               ├─ trade log
+                                                               ├─ P&L
+                                                               ├─ equity curve
+                                                               ├─ drawdown
+                                                               └─ Sharpe ratio
 ```
-
-### Design choices
-
-- **Data outside application code:** CSVs live under `data/`, not inside the
-  Django package.
-- **Single source of truth for paths:** `backend/options_dashboard/settings.py`
-  owns all data locations.
-- **Working-directory independence:** both Django and Jupyter use absolute
-  `pathlib.Path` objects derived from the repository root.
-- **CSV-oriented research pipeline:** sequential market data is read directly
-  with Pandas; SQLite is reserved for Django framework state.
-- **Cached expensive calculations:** repeated Greek requests are cached by the
-  Django cache layer.
-- **Separated pricing formulas:** request orchestration and timestamp alignment
-  remain in `views.py`, while Black–Scholes and Greek formulas live in dedicated
-  `iv.py` and `greeks.py` modules.
-
----
 
 ## Repository structure
 
@@ -135,26 +168,30 @@ options-fiesta/
 │   └── options/
 │       └── NIFTY/
 │           └── 2023-12-28/
-│           ├── 19800_call_2023-12-28.csv
-│           ├── 19800_put_2023-12-28.csv
-│           └── ...
+│               ├── 19800_call_2023-12-28.csv
+│               ├── 19800_put_2023-12-28.csv
+│               └── ...
 │
 ├── backend/
 │   ├── manage.py
 │   ├── options_dashboard/
-│   │   ├── settings.py          # environment and centralized data paths
+│   │   ├── settings.py
 │   │   ├── urls.py
 │   │   ├── asgi.py
 │   │   └── wsgi.py
 │   └── dashboard/
-│       ├── views.py             # HTTP/API orchestration
-│       ├── utils.py             # contract discovery and data locations
-│       ├── iv.py                # Black–Scholes pricing + IV inversion
-│       ├── greeks.py            # analytical option sensitivities
-│       ├── backtest.py          # dashboard adapter for research output
+│       ├── iv.py
+│       ├── greeks.py
+│       ├── utils.py
+│       ├── views.py
+│       ├── backtest.py
 │       ├── urls.py
-│       ├── templates/dashboard/index.html
-│       └── static/dashboard/images/
+│       ├── templates/
+│       │   └── dashboard/
+│       │       └── index.html
+│       └── static/
+│           └── dashboard/
+│               └── images/
 │
 ├── notebooks/
 │   ├── straddle_backtest.ipynb
@@ -162,150 +199,153 @@ options-fiesta/
 │
 ├── .env.example
 ├── .gitignore
-├── PATH_MIGRATION.md
 ├── requirements.txt
 └── README.md
 ```
 
----
+## Data
 
-## API surface
+The included option sample contains:
 
-| Endpoint | Purpose | Main inputs |
-|---|---|---|
-| `GET /api/greeks/` | Historical Greek series by contract | `r` |
-| `GET /api/ivs/` | IV points across strikes | `spot`, `r` |
-| `GET /api/iv/` | Historical IV series for available contracts | `r` |
-| `GET /api/backtest/` | Display a saved strategy research result | `strategy=straddle|butterfly` |
+- NIFTY spot OHLC observations at one-minute frequency;
+- calls and puts for the `2023-12-28` expiry;
+- strikes from `19,800` to `22,000` at 100-point intervals;
+- option OHLC premium, volume, and open-interest columns;
+- 46 individual option-contract CSV files.
 
-Example:
+The expected option filename format is:
 
-```bash
-curl "http://127.0.0.1:8000/api/iv/?r=0.07"
+```text
+<strike>_<call|put>_<YYYY-MM-DD>.csv
 ```
 
-The dashboard is available at `/`.
+For example:
 
----
+```text
+21000_call_2023-12-28.csv
+21000_put_2023-12-28.csv
+```
 
-## Run locally
+See [`data/README.md`](data/README.md) for the complete column definitions and directory convention.
 
-### 1. Clone and create an environment
+## Running the project
+
+### 1. Create and activate a virtual environment
 
 ```bash
 git clone https://github.com/Garvit423/options-fiesta.git
 cd options-fiesta
 
-python -m venv .venv
-source .venv/bin/activate        # macOS/Linux
-# .venv\Scripts\activate         # Windows PowerShell
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+On Windows PowerShell:
+
+```powershell
+.venv\Scripts\Activate.ps1
 ```
 
 ### 2. Install dependencies
 
 ```bash
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 ```
 
-### 3. Configure local settings
+### 3. Create local configuration
 
 ```bash
 cp .env.example .env
 ```
 
-The default configuration already points to the bundled `data/` directory.
+The default configuration uses the dataset committed under `data/`.
 
 ### 4. Initialize and run Django
 
 ```bash
 cd backend
 python manage.py migrate
+python manage.py check
 python manage.py runserver
 ```
 
-Open `http://127.0.0.1:8000/`.
+Open:
 
-### 5. Open the research notebooks
+```text
+http://127.0.0.1:8000/
+```
 
-Install Jupyter if it is not already available, then launch it from the
-repository root:
+### 5. Run the notebooks
+
+From the repository root:
 
 ```bash
-pip install jupyterlab
+python -m pip install jupyterlab
 jupyter lab notebooks/
 ```
 
-Each notebook locates the repository automatically, so it can also be opened
-from an IDE without editing relative paths.
+The notebooks locate the repository-level data directory without depending on the directory from which Jupyter was launched.
 
----
+## Configuration
 
-## Data assumptions
+The following variables can be set in `.env`:
 
-The bundled study data contains:
+```env
+SECRET_KEY=replace-with-a-local-development-key
+DEBUG=True
+ALLOWED_HOSTS=127.0.0.1,localhost
+TIME_ZONE=Asia/Kolkata
 
-- minute-level NIFTY OHLC observations;
-- 46 option-contract CSVs;
-- strikes from 19,800 to 22,000 in 100-point intervals;
-- calls and puts for the 28 December 2023 expiry;
-- OHLC premium, volume, and open-interest fields.
+OPTIONS_FIESTA_DATA_DIR=data
+OPTIONS_UNDERLYING=NIFTY
+OPTIONS_EXPIRY=2023-12-28
+```
 
-The analytics merge the option and underlying series on rounded minute
-timestamps. Option close is treated as the observed premium for IV inversion.
+Data paths are defined centrally in [`backend/options_dashboard/settings.py`](backend/options_dashboard/settings.py) and consumed by [`backend/dashboard/utils.py`](backend/dashboard/utils.py). Changing an expiry or moving the data directory does not require editing analytics code.
 
----
+## API endpoints
 
-## Important modelling limitations
+| Method and endpoint | Purpose | Parameters |
+|---|---|---|
+| `GET /` | Render the dashboard | — |
+| `GET /api/greeks/` | Return historical Greek values by contract | `r` |
+| `GET /api/ivs/` | Return IV values across available strikes | `spot`, `r` |
+| `GET /api/iv/` | Return historical IV time series | `r` |
+| `GET /api/backtest/` | Return an exported strategy summary and chart | `strategy=straddle` or `strategy=butterfly` |
 
-This is a quantitative research project, not a production exchange gateway.
-The interpretation of results should account for:
+Example:
 
-1. **European Black–Scholes assumptions:** constant rates/volatility,
-   frictionless markets, lognormal returns, and no discrete jumps.
-2. **Single-expiry sample:** the bundled data does not form a complete
-   cross-maturity volatility surface.
-3. **OHLC rather than bid–ask quotes:** spread, queue position, and market impact
-   are not directly observable.
-4. **Historical replay, not a live feed:** calculations are performed on demand,
-   but the supplied observations are historical CSV records.
-5. **Saved web backtest output:** strategy calculations currently live in the
-   notebooks; the dashboard adapter serves exported summaries and figures.
-6. **Research-period risk:** strategy results require out-of-sample validation
-   before any economic conclusion can be made.
+```bash
+curl "http://127.0.0.1:8000/api/iv/?r=0.06"
+```
 
-These constraints are documented deliberately so that the quantitative claims
-remain reproducible and defensible.
+The risk-free rate is supplied as a decimal, so `0.06` represents 6% per year.
 
----
+## Where the main claims are implemented
 
-## Interview-oriented code tour
+| Project capability | Main files |
+|---|---|
+| Django options analytics application | `backend/dashboard/views.py`, `backend/dashboard/urls.py`, `backend/dashboard/templates/dashboard/index.html` |
+| On-demand implied-volatility calculation | `backend/dashboard/iv.py`, `backend/dashboard/views.py` |
+| Delta, Gamma, Theta, Vega, and Rho | `backend/dashboard/greeks.py` |
+| Interactive 3D IV visualization | `backend/dashboard/templates/dashboard/index.html`, `GET /api/iv/` |
+| Straddle backtest | `notebooks/straddle_backtest.ipynb` |
+| Butterfly backtest | `notebooks/butterfly_backtest.ipynb` |
+| Sharpe ratio and drawdown | final analysis cells in both strategy notebooks |
+| Centralized data paths and contract discovery | `backend/options_dashboard/settings.py`, `backend/dashboard/utils.py` |
 
-For a quick review, read the project in this order:
+## Assumptions and limitations
 
-1. `backend/dashboard/iv.py` — Black–Scholes and Brent inversion;
-2. `backend/dashboard/greeks.py` — Delta/Gamma/Theta/Vega/Rho formulas;
-3. `backend/dashboard/utils.py` — data discovery and contract metadata;
-4. `backend/dashboard/views.py` — timestamp merge, caching, and API payloads;
-5. `notebooks/straddle_backtest.ipynb` — two-leg volatility strategy;
-6. `notebooks/butterfly_backtest.ipynb` — three-strike defined-risk structure.
-
-The path refactor is documented separately in [`PATH_MIGRATION.md`](PATH_MIGRATION.md).
-
----
-
-## Natural extensions
-
-- promote notebook strategy logic into a reusable event-driven backtest module;
-- use bid/ask quotes and an explicit transaction-cost/slippage model;
-- add multiple expiries and interpolate a conventional volatility surface;
-- validate analytical Greeks against finite differences;
-- add no-arbitrage checks before IV inversion;
-- add unit tests for pricing, path discovery, API responses, and metrics;
-- connect a live quote adapter without changing the pricing interface.
-
----
+- The bundled market observations are historical; there is no live exchange or broker connection.
+- “On demand” refers to IV and Greek computation when the API is called, not to the source of the market data.
+- Black–Scholes assumes European exercise, lognormal returns, constant volatility and interest rates, and frictionless markets.
+- The current dataset contains one expiry, so the 3D visualization is historical strike × time rather than a full cross-maturity surface.
+- Backtests use minute-bar closing prices rather than bid and ask quotes.
+- The current research notebooks do not model transaction costs, slippage, queue position, partial fills, or market impact.
+- Strategy results are based on a limited historical sample and are not evidence of future profitability.
+- The dashboard's backtest API serves exported research output; the actual strategy calculations remain in the notebooks.
 
 ## Disclaimer
 
-This repository is for educational and research purposes only. It is not
-investment advice and does not represent an executable trading recommendation.
+This repository is an educational quantitative-finance project. It is not investment advice and is not intended for live trading without further validation, execution modelling, and risk controls.
